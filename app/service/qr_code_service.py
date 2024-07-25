@@ -2,6 +2,9 @@ import qrcode
 from io import BytesIO
 
 def generate_qr_code(data: str) -> bytes:
+    """
+    Generates a QR code from the given data and returns it as a bytes object.
+    """
     # Create a QR code
     qr = qrcode.QRCode(
         version=1,

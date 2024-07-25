@@ -16,7 +16,9 @@ def get_idp_metadata() -> dict:
 
 
 def get_issuer_metadata() -> dict:
-    "Gets the metadata from this application"
+    """
+    Gets the metadata from this application
+    """
     with open("app/config/metadata.json") as f:
         return json.load(f)
     
