@@ -24,15 +24,15 @@ def token():
         "c_nonce": "tZignsnFbp",
         "c_nonce_expires_in": 86400,
         "authorization_details": [
-                                     {
-                                         "type": "openid_credential",
-                                         "credential_configuration_id": "UniversityDegreeCredential",
-                                         "credential_identifiers": [
-                                             "CivilEngineeringDegree-2023",
-                                             "ElectricalEngineeringDegree-2023"
-                                         ]
-                                     }
-                                 ]
+            {
+                "type": "openid_credential",
+                "credential_configuration_id": "UniversityDegreeCredential",
+                "credential_identifiers": [
+                    "CivilEngineeringDegree-2023",
+                    "ElectricalEngineeringDegree-2023"
+                ]
+            }
+        ]
         }
 
 
