@@ -1,5 +1,5 @@
-# main.py
-
+from starlette.config import Config
+from fastapi import APIRouter, Request
 import os
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -14,29 +14,11 @@ from datetime import datetime, timedelta
 
 from app.model.credential import VerifiableCredential, CredentialSubject
 
-app = FastAPI()
+"""
+This file contains the OIDC endpoints for the OID4VCI specification.
+"""
 
-# Add session middleware
-app.add_middleware(SessionMiddleware, secret_key=uuid.uuid4())
-
-# Configure OAuth
-config = Config('.env')
-oauth = OAuth(config)
-
-oauth.register(
-    name=config('IDP_NAME'), # idporten
-    client_id=config('CLIENT_ID'),
-    client_secret=config('CLIENT_SECRET'),
-    server_metadata_url=config('IDP_URL') + '/.well-known/openid-configuration',
-    client_kwargs={'scope': 'openid profile difitest:guardian'},
-)
-
-# OAuth2 scheme for credential issuance
-oauth2_scheme = OAuth2AuthorizationCodeBearer(
-    authorizationUrl="auth",
-    tokenUrl="token"
-)
-
+router = APIRouter()
 
 
 # In-memory credential storage (replace with a database in production)
@@ -45,7 +27,7 @@ pre_authorized_codes: Dict[str, Dict] = {}
 
 ISSUER_DID = "did:example:123456789abcdefghi"
 
-@app.get("/.well-known/openid-credential-issuer")
+@router.get("/.well-known/openid-credential-issuer")
 async def credential_issuer_metadata(request: Request):
     """
     This endpoint is created according to draft 13 of the oid4vci specification,
@@ -70,7 +52,7 @@ async def credential_issuer_metadata(request: Request):
         },
     }
 
-@app.post("/credential-offer")
+@router.post("/credential-offer")
 async def credential_offer():
     pre_auth_code = str(uuid.uuid4())
     pre_authorized_codes[pre_auth_code] = {
@@ -92,7 +74,7 @@ async def credential_offer():
         }
     }
 
-@app.post("/token")
+@router.post("/token")
 async def token(request: Request):
     form_data = await request.form()
     grant_type = form_data.get("grant_type")
@@ -114,7 +96,7 @@ async def token(request: Request):
     
     raise HTTPException(status_code=400, detail="Unsupported grant type")
 
-@app.post("/credential")
+@router.post("/credential")
 async def issue_credential(request: Request):
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -150,7 +132,3 @@ async def issue_credential(request: Request):
     # In a real scenario, you would sign the credential here
     
     return JSONResponse(content=credential.dict())
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
