@@ -6,7 +6,7 @@ Make sure you have python installed.
 
 ```
 pip3 install -r requirements.txt
-uvicorn main:app --reload --port 8980
+python3 main.py
 ```
 
 ## Endpoint documentation
