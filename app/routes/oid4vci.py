@@ -1,18 +1,24 @@
 from starlette.config import Config
 from fastapi import APIRouter, Request
-import os
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2AuthorizationCodeBearer
+from fastapi.responses import HTMLResponse
 from starlette.config import Config
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from typing import Dict, List
+from fastapi.templating import Jinja2Templates
+import json
+
 import jwt
 import uuid
+import os
+from typing import Dict
 from datetime import datetime, timedelta 
 
 from app.model.credential import VerifiableCredential, CredentialSubject
+from app.service.misc import get_base_url
+from app.service.qr_code_service import generate_qr_code
+from app.service.misc import templates
 
 """
 This file contains the OIDC endpoints for the OID4VCI specification.
@@ -20,59 +26,94 @@ This file contains the OIDC endpoints for the OID4VCI specification.
 
 router = APIRouter()
 
+config = Config('.env')
 
 # In-memory credential storage (replace with a database in production)
 credentials: Dict[str, VerifiableCredential] = {}
 pre_authorized_codes: Dict[str, Dict] = {}
 
-ISSUER_DID = "did:example:123456789abcdefghi"
+def create_pre_auth_credential_offer(request: Request, pre_auth_code: str):
+    return {
+        "credential_issuer": get_base_url(request),
+        "credential_configuration_ids": [
+            "eu.europa.ec.eudi.pid_jwt_vc_json"
+        ],
+        "grants": {
+            "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
+                "pre-authorized_code": pre_auth_code,
+            }
+        }
+    }
 
 @router.get("/.well-known/openid-credential-issuer")
 async def credential_issuer_metadata(request: Request):
     """
-    This endpoint is created according to draft 13 of the oid4vci specification,
-    which can be found here: 
+    This endpoint is created according to draft 13 of the oid4vci specification
+    section 11, which can be found here: 
     https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p.
     """
-    host = request.headers.get("host", "localhost")
-    scheme = request.headers.get("x-forwarded-proto", "http")
-    base_url = f"{scheme}://{host}"
+    base_url = get_base_url(request)
     return {
-        "credential_issuer": ISSUER_DID,
+        "credential_issuer": base_url,
         "credential_endpoint": f"{base_url}/credential",
-        "authorization_endpoint": f"{base_url}/auth",
-        "token_endpoint": f"{base_url}/token",
-        "jwks_uri": f"{base_url}/jwks",
-        "credential_types_supported": ["VerifiableCredential", "ProfileCredential"],
-        "credentials_supported": {
-            "ProfileCredential": {
-                "types": ["VerifiableCredential", "ProfileCredential"],
-                "format": "jwt_vc",
-            }
-        },
-    }
-
-@router.post("/credential-offer")
-async def credential_offer():
-    pre_auth_code = str(uuid.uuid4())
-    pre_authorized_codes[pre_auth_code] = {
-        "exp": datetime.utcnow() + timedelta(minutes=5),
-        "credential_type": "ProfileCredential"
-    }
-    return {
-        "credential_issuer": ISSUER_DID,
-        "credentials": ["ProfileCredential"],
-        "grants": {
-            "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
-                "pre-authorized_code": pre_auth_code,
-                "tx_code": {
-                    "input_mode": "numeric",
-                    "length": 6,
-                    "description": "Please enter the 6-digit code displayed on your device"
+        "authorization_servers": [config('IDP_URL')],
+        "credential_configurations_supported": {
+            "eu.europa.ec.eudi.pid_jwt_vc_json": {
+                "format": "jwt_vc_json", # TODO: finne ut hvilket format som er lettest
+                "scope": "openid profile difitest:guardian", # Usikker på om denne trengs her, men regner med set siden vi bruker authorization_servers?
+                "types": ["VerifiableCredential", "WardCredential"],
+                "claims": {
+                    "ward_pid_number": {
+                        "display": [
+                        {
+                            "locale": "en",
+                            "name": "PID of the ward"
+                        }
+                        ],
+                        "mandatory": False
+                    },
+                    "user_pid": {
+                        "display": [
+                        {
+                            "locale": "en",
+                            "name": "PID of user"
+                        }
+                        ],
+                        "mandatory": False
+                    }
+                    },
+                    "display": [
+                    {
+                        "locale": "en",
+                        "logo": {
+                        "alt_text": "A square figure of a PID",
+                        "url": "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fcdn4.iconfinder.com%2Fdata%2Ficons%2Fuser-people-2%2F48%2F6-512.png&f=1&nofb=1&ipt=85ca6adb6313847a103ece018a5771519cd81453b0bac24aab3d73e547709ebc&ipo=images"
+                        },
+                        "name": "PID"
+                    }
+                    ],
+                    "format": "vc+sd-jwt",
+                    "scope": "eu.europa.ec.eudi.pid.1", # Skjønner ikke helt.
+                    "vct": "eu.europa.ec.eudi.pid_jwt_vc_json"
                 }
             }
         }
+    
+@router.get("/credential_offer")
+async def credential_offer_qr(request: Request):
+    """
+    Qr code endpoint with a credential offer.
+    """
+    pre_auth_code = str(uuid.uuid4())
+    base_redirect_uri = "openid-credential-offer://"
+    qr_code, data = generate_qr_code(base_redirect_uri, create_pre_auth_credential_offer(request, pre_auth_code))
+    print(qr_code)
+    pre_authorized_codes[pre_auth_code] = {
+        "exp": datetime.now() + timedelta(minutes=5),
+        "credential_type": "eu.europa.ec.eudi.pid_jwt_vc_json"
     }
+    print("Pre-auth-code saved in local storage!")
+    return templates.TemplateResponse("qr_code.html", {"request": request, "qr_code": qr_code, "data": data})
 
 """
 Token endpoint. The wallet till send a post request to this endpoint, and that will contain a tx code and a pre 
