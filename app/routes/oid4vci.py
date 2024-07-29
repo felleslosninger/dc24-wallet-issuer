@@ -120,7 +120,7 @@ def token(request:Request) :
         response.headers = headers
 
         #Sends the response back so that the wallet gets the id token in return.
-        return {response}
+        return response
 
     #If the grant type is not pre-autorized flow:
     else : raise HTTPException(status_code=418, detail="Service only supports pre autorized flow.")
