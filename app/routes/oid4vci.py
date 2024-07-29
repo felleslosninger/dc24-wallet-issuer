@@ -18,7 +18,6 @@ from datetime import datetime, timedelta
 from app.model.credential import VerifiableCredential, CredentialSubject
 from app.service.misc import get_base_url
 from app.service.qr_code_service import generate_qr_code
-from app.service.credential_service import create_pre_auth_credential
 from app.service.misc import templates
 
 """
@@ -30,6 +29,19 @@ router = APIRouter()
 # In-memory credential storage (replace with a database in production)
 credentials: Dict[str, VerifiableCredential] = {}
 pre_authorized_codes: Dict[str, Dict] = {}
+
+def create_pre_auth_credential(request: Request, pre_auth_code: str):
+    return {
+        "credential_issuer": get_base_url(request),
+        "credential_configuration_ids": [
+            "eu.europa.ec.eudi.pid_jwt_vc_json"
+        ],
+        "grants": {
+            "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
+                "pre-authorized_code": pre_auth_code,
+            }
+        }
+    }
 
 @router.get("/.well-known/openid-credential-issuer")
 async def credential_issuer_metadata(request: Request):
@@ -52,34 +64,31 @@ async def credential_issuer_metadata(request: Request):
         },
     }
 
-@router.get("/credential-offer")
-async def credential_offer(request: Request):
+# This endpoint is not needed with pre-authorized flow
+# @router.get("/credential-offer")
+# async def credential_offer(request: Request):
+#     pre_auth_code = str(uuid.uuid4())
+#     pre_authorized_codes[pre_auth_code] = {
+#         "exp": datetime.now() + timedelta(minutes=5),
+#         "credential_type": "eu.europa.ec.eudi.pid_jwt_vc_json"
+#     }
+#     return create_pre_auth_credential(request)
+    
+@router.get("/credential/qr-code")
+async def credential_offer_qr(request: Request):
+    """
+    Qr code endpoint with a credential offer.
+    """
     pre_auth_code = str(uuid.uuid4())
+    base_redirect_uri = "openid-credential-offer://"
+    qr_code, data = generate_qr_code(base_redirect_uri, create_pre_auth_credential(request, pre_auth_code))
+    print(qr_code)
     pre_authorized_codes[pre_auth_code] = {
         "exp": datetime.now() + timedelta(minutes=5),
         "credential_type": "eu.europa.ec.eudi.pid_jwt_vc_json"
     }
-    return {
-        "credential_issuer": get_base_url(request),
-        "credentials": ["eu.europa.ec.eudi.pid_jwt_vc_json"],
-        "grants": {
-            "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
-                "pre-authorized_code": pre_auth_code,
-                #"tx_code": {
-                #    "input_mode": "numeric",
-                #     "length": 6,
-                #     "description": "Please enter the 6-digit code displayed on your device"
-                # }
-            }
-        }
-    }
-    
-@router.get("/credential/qr-code")
-async def credential_offer_qr(request: Request):
-    base_redirect_uri = "openid-credential-offer://"
-    qr_code = generate_qr_code(base_redirect_uri + json.dumps(create_pre_auth_credential(request)))
-    return templates.TemplateResponse("qr_code.html", {"qr_code": qr_code})
-    
+    print("Pre-auth-code saved in local storage!")
+    return templates.TemplateResponse("qr_code.html", {"request": request, "qr_code": qr_code, "data": data})
 
 @router.post("/token")
 async def token(request: Request):
