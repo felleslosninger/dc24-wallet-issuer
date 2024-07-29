@@ -26,11 +26,13 @@ This file contains the OIDC endpoints for the OID4VCI specification.
 
 router = APIRouter()
 
+config = Config('.env')
+
 # In-memory credential storage (replace with a database in production)
 credentials: Dict[str, VerifiableCredential] = {}
 pre_authorized_codes: Dict[str, Dict] = {}
 
-def create_pre_auth_credential(request: Request, pre_auth_code: str):
+def create_pre_auth_credential_offer(request: Request, pre_auth_code: str):
     return {
         "credential_issuer": get_base_url(request),
         "credential_configuration_ids": [
@@ -54,34 +56,57 @@ async def credential_issuer_metadata(request: Request):
     return {
         "credential_issuer": base_url,
         "credential_endpoint": f"{base_url}/credential",
-        #"credential_types_supported": ["VerifiableCredential", "ProfileCredential"],
+        "authorization_servers": [config('IDP_URL')],
         "credential_configurations_supported": {
             "eu.europa.ec.eudi.pid_jwt_vc_json": {
                 "format": "jwt_vc_json", # TODO: finne ut hvilket format som er lettest
-                "scope": "openid profile difitest:guardian", # Usikker på m denne trengs her, men 
-                "types": ["VerifiableCredential", "ProfileCredential"],
+                "scope": "openid profile difitest:guardian", # Usikker på om denne trengs her, men regner med set siden vi bruker authorization_servers?
+                "types": ["VerifiableCredential", "WardCredential"],
+                "claims": {
+                    "ward_pid_number": {
+                        "display": [
+                        {
+                            "locale": "en",
+                            "name": "PID of the ward"
+                        }
+                        ],
+                        "mandatory": False
+                    },
+                    "user_pid": {
+                        "display": [
+                        {
+                            "locale": "en",
+                            "name": "PID of user"
+                        }
+                        ],
+                        "mandatory": False
+                    }
+                    },
+                    "display": [
+                    {
+                        "locale": "en",
+                        "logo": {
+                        "alt_text": "A square figure of a PID",
+                        "url": "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fcdn4.iconfinder.com%2Fdata%2Ficons%2Fuser-people-2%2F48%2F6-512.png&f=1&nofb=1&ipt=85ca6adb6313847a103ece018a5771519cd81453b0bac24aab3d73e547709ebc&ipo=images"
+                        },
+                        "name": "PID"
+                    }
+                    ],
+                    "format": "vc+sd-jwt",
+                    "scope": "eu.europa.ec.eudi.pid.1", # Skjønner ikke helt.
+                    "vct": "eu.europa.ec.eudi.pid_jwt_vc_json"
+                }
             }
-        },
-    }
-
-# This endpoint is not needed with pre-authorized flow
-# @router.get("/credential-offer")
-# async def credential_offer(request: Request):
-#     pre_auth_code = str(uuid.uuid4())
-#     pre_authorized_codes[pre_auth_code] = {
-#         "exp": datetime.now() + timedelta(minutes=5),
-#         "credential_type": "eu.europa.ec.eudi.pid_jwt_vc_json"
-#     }
-#     return create_pre_auth_credential(request)
+        }
     
-@router.get("/credential/qr-code")
+@router.get("/credential_offer")
 async def credential_offer_qr(request: Request):
     """
     Qr code endpoint with a credential offer.
     """
     pre_auth_code = str(uuid.uuid4())
     base_redirect_uri = "openid-credential-offer://"
-    qr_code, data = generate_qr_code(base_redirect_uri, create_pre_auth_credential(request, pre_auth_code))
+    qr_code, data = generate_qr_code(base_redirect_uri, create_pre_auth_credential_offer(request, pre_auth_code))
     print(qr_code)
     pre_authorized_codes[pre_auth_code] = {
         "exp": datetime.now() + timedelta(minutes=5),

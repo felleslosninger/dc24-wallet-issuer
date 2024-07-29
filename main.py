@@ -23,8 +23,6 @@ async def home_page(request: Request):
     """
     return templates.TemplateResponse("home.html", {"request": request})
 
-
-
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8980))
     import uvicorn
