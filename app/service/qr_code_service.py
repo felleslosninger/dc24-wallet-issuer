@@ -1,7 +1,8 @@
 import qrcode
+import base64
 from io import BytesIO
 
-def generate_qr_code(data: str) -> bytes:
+def generate_qr_code(data: str) -> str:
     """
     Generates a QR code from the given data and returns it as a bytes object.
     """
@@ -21,4 +22,4 @@ def generate_qr_code(data: str) -> bytes:
     # Save the image to a bytes buffer
     buf = BytesIO()
     img.save(buf, format='PNG')
-    return buf.getvalue()
+    return base64.b64encode(buf.getvalue()).decode('utf-8')

@@ -70,7 +70,7 @@ async def credential_issuer_metadata(request: Request):
         },
     }
 
-@app.post("/credential-offer")
+@app.get("/credential_offer")
 async def credential_offer():
     pre_auth_code = str(uuid.uuid4())
     pre_authorized_codes[pre_auth_code] = {

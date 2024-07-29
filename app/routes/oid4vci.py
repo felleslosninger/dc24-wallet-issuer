@@ -1,18 +1,25 @@
 from starlette.config import Config
 from fastapi import APIRouter, Request
-import os
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2AuthorizationCodeBearer
+from fastapi.responses import HTMLResponse
 from starlette.config import Config
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from typing import Dict, List
+from fastapi.templating import Jinja2Templates
+import json
+
 import jwt
 import uuid
+import os
+from typing import Dict
 from datetime import datetime, timedelta 
 
 from app.model.credential import VerifiableCredential, CredentialSubject
+from app.service.misc import get_base_url
+from app.service.qr_code_service import generate_qr_code
+from app.service.credential_service import create_pre_auth_credential
+from app.service.misc import templates
 
 """
 This file contains the OIDC endpoints for the OID4VCI specification.
@@ -20,59 +27,59 @@ This file contains the OIDC endpoints for the OID4VCI specification.
 
 router = APIRouter()
 
-
 # In-memory credential storage (replace with a database in production)
 credentials: Dict[str, VerifiableCredential] = {}
 pre_authorized_codes: Dict[str, Dict] = {}
 
-ISSUER_DID = "did:example:123456789abcdefghi"
-
 @router.get("/.well-known/openid-credential-issuer")
 async def credential_issuer_metadata(request: Request):
     """
-    This endpoint is created according to draft 13 of the oid4vci specification,
-    which can be found here: 
+    This endpoint is created according to draft 13 of the oid4vci specification
+    section 11, which can be found here: 
     https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p.
     """
-    host = request.headers.get("host", "localhost")
-    scheme = request.headers.get("x-forwarded-proto", "http")
-    base_url = f"{scheme}://{host}"
+    base_url = get_base_url(request)
     return {
-        "credential_issuer": ISSUER_DID,
+        "credential_issuer": base_url,
         "credential_endpoint": f"{base_url}/credential",
-        "authorization_endpoint": f"{base_url}/auth",
-        "token_endpoint": f"{base_url}/token",
-        "jwks_uri": f"{base_url}/jwks",
-        "credential_types_supported": ["VerifiableCredential", "ProfileCredential"],
-        "credentials_supported": {
-            "ProfileCredential": {
+        #"credential_types_supported": ["VerifiableCredential", "ProfileCredential"],
+        "credential_configurations_supported": {
+            "eu.europa.ec.eudi.pid_jwt_vc_json": {
+                "format": "jwt_vc_json", # TODO: finne ut hvilket format som er lettest
+                "scope": "openid profile difitest:guardian", # Usikker på m denne trengs her, men 
                 "types": ["VerifiableCredential", "ProfileCredential"],
-                "format": "jwt_vc",
             }
         },
     }
 
-@router.post("/credential-offer")
-async def credential_offer():
+@router.get("/credential-offer")
+async def credential_offer(request: Request):
     pre_auth_code = str(uuid.uuid4())
     pre_authorized_codes[pre_auth_code] = {
-        "exp": datetime.utcnow() + timedelta(minutes=5),
-        "credential_type": "ProfileCredential"
+        "exp": datetime.now() + timedelta(minutes=5),
+        "credential_type": "eu.europa.ec.eudi.pid_jwt_vc_json"
     }
     return {
-        "credential_issuer": ISSUER_DID,
-        "credentials": ["ProfileCredential"],
+        "credential_issuer": get_base_url(request),
+        "credentials": ["eu.europa.ec.eudi.pid_jwt_vc_json"],
         "grants": {
             "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
                 "pre-authorized_code": pre_auth_code,
-                "tx_code": {
-                    "input_mode": "numeric",
-                    "length": 6,
-                    "description": "Please enter the 6-digit code displayed on your device"
-                }
+                #"tx_code": {
+                #    "input_mode": "numeric",
+                #     "length": 6,
+                #     "description": "Please enter the 6-digit code displayed on your device"
+                # }
             }
         }
     }
+    
+@router.get("/credential/qr-code")
+async def credential_offer_qr(request: Request):
+    base_redirect_uri = "openid-credential-offer://"
+    qr_code = generate_qr_code(base_redirect_uri + json.dumps(create_pre_auth_credential(request)))
+    return templates.TemplateResponse("qr_code.html", {"qr_code": qr_code})
+    
 
 @router.post("/token")
 async def token(request: Request):

@@ -1,6 +1,8 @@
 from authlib.integrations.starlette_client import OAuth
 from starlette.config import Config
 from fastapi import APIRouter, Request
+from starlette.responses import RedirectResponse
+
 
 """
 This file contains the endpoints for logging in to the IDP (Identity Provider) and getting the user's information.
@@ -32,3 +34,8 @@ async def auth(request: Request):
     print("User token: ", token)
     user = token['userinfo']
     return user
+
+@router.get('/logout')
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url='/')
