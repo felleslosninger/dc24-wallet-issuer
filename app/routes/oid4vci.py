@@ -90,27 +90,64 @@ async def credential_offer_qr(request: Request):
     print("Pre-auth-code saved in local storage!")
     return templates.TemplateResponse("qr_code.html", {"request": request, "qr_code": qr_code, "data": data})
 
+"""
+Token endpoint. The wallet till send a post request to this endpoint, and that will contain a tx code and a pre 
+authorized code. The pre authorized code we will check up against the pre authorized code registered with us. 
+If it matches, it will later (when we have created support for it) return the access token of the logged in user.
+"""
 @router.post("/token")
-async def token(request: Request):
-    form_data = await request.form()
-    grant_type = form_data.get("grant_type")
-    
+def token(request:Request) :
+    #Fills data with the parameters from the xxx urlencoded content which posts to
+    #our endpoint
+    data = request.form
+
+    #Checks if it is supposed to follow pre-autorized code run.
+    grant_type = data.get('grant_type')
     if grant_type == "urn:ietf:params:oauth:grant-type:pre-authorized_code":
-        pre_auth_code = form_data.get("pre-authorized_code")
-        tx_code = form_data.get("tx_code")
-        
-        if pre_auth_code not in pre_authorized_codes:
+
+        #Gets and sets the parts of the url encoded content.
+        pre_authorized_code = data.get('pre-authorized_code')
+        # todo
+        tx_code = data.get('tx_code')
+
+        #If the pre autorized code is not same as the one set earlier in credential offer, exception.
+        if pre_authorized_code not in pre_authorized_codes:
             raise HTTPException(status_code=400, detail="Invalid pre-authorized code")
-        
-        if datetime.utcnow() > pre_authorized_codes[pre_auth_code]["exp"]:
-            raise HTTPException(status_code=400, detail="Pre-authorized code expired")
-        
-        # In a real scenario, verify tx_code here
-        
-        access_token = jwt.encode({"sub": pre_auth_code, "exp": datetime.utcnow() + timedelta(minutes=5)}, os.getenv("JWT_SECRET_KEY"), algorithm="HS256")
-        return {"access_token": access_token, "token_type": "Bearer"}
-    
-    raise HTTPException(status_code=400, detail="Unsupported grant type")
+        #Else, it now will send a fake access token, with the required information.
+        response = {
+            "accessToken": "eyRANDOMACCESSTOKEN",
+            "token_type": "bearer",
+            "expires_in": 86400,
+            "c_nonce": "lolololol",
+            "c_nonce_expires_in": 86400,
+            "authorization_details": [
+                {
+                    "type": "openid_credential",
+                    "credential_configuration_id": "UniversityDegreeCredential",
+                    "credential_identifiers": [
+                        "CivilEngineeringDegree-2023",
+                        "ElectricalEngineeringDegree-2023"
+                    ]
+                }
+            ]
+        }
+
+        #Headers neeed to be this, according to draft 13 oid4vci.
+        headers = {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store"
+        }
+
+        #Sets headers to the response we will send.
+        response.headers = headers
+
+        #Sends the response back so that the wallet gets the id token in return.
+        return {request}
+
+    #If the grant type is not pre-autorized flow:
+    else : raise HTTPException(status_code=418, detail="Service only supports pre autorized flow.")
+
+
 
 @router.post("/credential")
 async def issue_credential(request: Request):
