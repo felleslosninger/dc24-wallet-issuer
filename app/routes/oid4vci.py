@@ -101,29 +101,13 @@ def token(request:Request) :
         if pre_authorized_code not in pre_authorized_codes:
             raise HTTPException(status_code=400, detail="Invalid pre-authorized code")
 
-        #Else, it now will now get the access token of the logged in user of ansattporten/id porten.
+        #Else, it now will now get the access token of the logged in user of idporten.
         token = getLoggedInUsersToken()
-        payload = decode(token)
-
-        authorization_details = payload.get('authorization_details')
-        reportees = authorization_details.get('reportees')
-        id = reportees.get('ID')
-        identifiers = reportees.get('Name')
-
 
         response = {
             "accessToken": token,
             "token_type": "bearer",
             "expires_in": 86400,
-            "authorization_details": [
-                {
-                    "type": "openid_credential",
-                    "credential_configuration_id": id,
-                    "credential_identifiers": [
-                        identifiers
-                    ]
-                }
-            ]
         }
 
         #Headers neeed to be this, according to draft 13 oid4vci.
@@ -140,22 +124,6 @@ def token(request:Request) :
 
     #If the grant type is not pre-autorized flow:
     else : raise HTTPException(status_code=418, detail="Service only supports pre autorized flow.")
-
-def decode(token):
-    # Decodes JWT base64 encoded token
-    try:
-        alg, payload, signature = token.split(".")
-        payload += '=' * (-len(payload) % 4)
-        decode_payload = json.loads(base64.b64decode(payload).decode("utf-8"))
-        if "client_id" in decode_payload.keys():
-            return decode_payload
-        else:
-            return None
-    except (Exception, TypeError):
-        return None
-
-
-
 
 
 @router.post("/credential")
