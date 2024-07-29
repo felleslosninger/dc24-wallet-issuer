@@ -6,6 +6,8 @@ from fastapi import APIRouter, Request
 This file contains the endpoints for logging in to the IDP (Identity Provider) and getting the user's information.
 """
 
+token = ""
+
 router = APIRouter()
 
 config = Config('.env')
@@ -32,3 +34,6 @@ async def auth(request: Request):
     print("User token: ", token)
     user = token['userinfo']
     return user
+
+def getLoggedInUsersToken():
+    return token

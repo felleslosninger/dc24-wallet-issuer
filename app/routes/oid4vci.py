@@ -10,7 +10,10 @@ from authlib.integrations.starlette_client import OAuth
 from typing import Dict, List
 import jwt
 import uuid
-from datetime import datetime, timedelta 
+import base64
+from datetime import datetime, timedelta
+from app.routes.oauth import getLoggedInUsersToken
+
 
 from app.model.credential import VerifiableCredential, CredentialSubject
 
@@ -75,7 +78,7 @@ async def credential_offer():
     }
 
 """
-Token endpoint. The wallet till send a post request to this endpoint, and that will contain a tx code and a pre 
+Token endpoint. The wallet will send a post request to this endpoint, and that will contain a tx code and a pre 
 authorized code. The pre authorized code we will check up against the pre authorized code registered with us. 
 If it matches, it will later (when we have created support for it) return the access token of the logged in user.
 """
@@ -97,20 +100,27 @@ def token(request:Request) :
         #If the pre autorized code is not same as the one set earlier in credential offer, exception.
         if pre_authorized_code not in pre_authorized_codes:
             raise HTTPException(status_code=400, detail="Invalid pre-authorized code")
-        #Else, it now will send a fake access token, with the required information.
+
+        #Else, it now will now get the access token of the logged in user of ansattporten/id porten.
+        token = getLoggedInUsersToken()
+        payload = decode(token)
+
+        authorization_details = payload.get('authorization_details')
+        reportees = authorization_details.get('reportees')
+        id = reportees.get('ID')
+        identifiers = reportees.get('Name')
+
+
         response = {
-            "accessToken": "eyRANDOMACCESSTOKEN",
+            "accessToken": token,
             "token_type": "bearer",
             "expires_in": 86400,
-            "c_nonce": "lolololol",
-            "c_nonce_expires_in": 86400,
             "authorization_details": [
                 {
                     "type": "openid_credential",
-                    "credential_configuration_id": "UniversityDegreeCredential",
+                    "credential_configuration_id": id,
                     "credential_identifiers": [
-                        "CivilEngineeringDegree-2023",
-                        "ElectricalEngineeringDegree-2023"
+                        identifiers
                     ]
                 }
             ]
@@ -126,10 +136,25 @@ def token(request:Request) :
         response.headers = headers
 
         #Sends the response back so that the wallet gets the id token in return.
-        return {request}
+        return {response}
 
     #If the grant type is not pre-autorized flow:
     else : raise HTTPException(status_code=418, detail="Service only supports pre autorized flow.")
+
+def decode(token):
+    # Decodes JWT base64 encoded token
+    try:
+        alg, payload, signature = token.split(".")
+        payload += '=' * (-len(payload) % 4)
+        decode_payload = json.loads(base64.b64decode(payload).decode("utf-8"))
+        if "client_id" in decode_payload.keys():
+            return decode_payload
+        else:
+            return None
+    except (Exception, TypeError):
+        return None
+
+
 
 
 
