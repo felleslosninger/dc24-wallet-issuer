@@ -9,6 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from fastapi.templating import Jinja2Templates
 import json
+from typing import Dict
 
 import jwt
 import uuid
@@ -127,15 +128,15 @@ def token(request:Request) :
     #Fills data with the parameters from the xxx urlencoded content which posts to
     #our endpoint
     data = request.form
+    tx_code = data.get('tx_code')
 
     #Checks if it is supposed to follow pre-autorized code run.
     grant_type = data.get('grant_type')
-    if grant_type == "urn:ietf:params:oauth:grant-type:pre-authorized_code":
+    if grant_type == "urn:ietf:params:oauth:grant-type:pre-authorized_code" and tx_code == "123456":
 
         #Gets and sets the parts of the url encoded content.
         pre_authorized_code = data.get('pre-authorized_code')
-        # todo
-        tx_code = data.get('tx_code')
+
 
         #If the pre autorized code is not same as the one set earlier in credential offer, exception.
         if pre_authorized_code not in pre_authorized_codes:
