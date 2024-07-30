@@ -11,7 +11,7 @@ from app.service.misc import templates
 import os
 
 config = Config('.env')
-app = FastAPI()
+app = FastAPI(port=8980)
 app.include_router(oauth.router)
 app.include_router(oid4vci.router)
 app.add_middleware(SessionMiddleware, secret_key="this is a secret key")
