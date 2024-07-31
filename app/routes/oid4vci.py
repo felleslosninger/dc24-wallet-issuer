@@ -1,6 +1,5 @@
 from starlette.config import Config
 from fastapi import APIRouter, Request
-import os
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
@@ -8,16 +7,25 @@ from starlette.config import Config
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from fastapi.templating import Jinja2Templates
-import json
-from typing import Dict
+from urllib.parse import parse_qs
+import cbor2
+from cose.messages import Sign1Message
+from cose.keys import CoseKey
+from cose.keys.keytype import KTY
+from cose.keys.keyops import KeyOps
+from cose.keys.curves import P256
+from cose.algorithms import Es256
+from cose.keys.keyparam import EC2KpCurve, EC2KpD, EC2KpX, EC2KpY
 
+import os
+import json
 import jwt
 import uuid
 import base64
+from typing import Dict
 from datetime import datetime, timedelta
+
 from app.routes.oauth import getLoggedInUsersToken
-
-
 from app.model.credential import VerifiableCredential, CredentialSubject
 from app.service.misc import get_base_url
 from app.service.qr_code_service import generate_qr_code
@@ -55,17 +63,18 @@ def create_pre_auth_credential_offer(request: Request, pre_auth_code: str):
     
 @router.get("/.well-known/openid-configuration")
 async def openid_configuration(request: Request):
+    base_url = get_base_url(request)
     return {
   "request_parameter_supported": False,
-  "pushed_authorization_request_endpoint": config('IDP_URL') + "/par",
+  "pushed_authorization_request_endpoint": base_url + "/par",
   "authorization_response_iss_parameter_supported": True,
-  "introspection_endpoint": config('IDP_URL') + "/token/introspect",
+  "introspection_endpoint": base_url + "/token/introspect",
   "claims_parameter_supported": False,
   "scopes_supported": [
     "openid",
     "profile"
   ],
-  "issuer": config('IDP_URL') + "",
+  "issuer": base_url + "",
   "acr_values_supported": [
     "idporten-loa-low",
     "idporten-loa-substantial",
@@ -90,7 +99,7 @@ async def openid_configuration(request: Request):
     "query.jwt",
     "form_post.jwt"
   ],
-  "token_endpoint": config('IDP_URL') + "/token",
+  "token_endpoint": base_url + "/token",
   "response_types_supported": [
     "code"
   ],
@@ -106,13 +115,13 @@ async def openid_configuration(request: Request):
     "se"
   ],
   "end_session_endpoint": "https://login.test.idporten.no/logout",
-  "revocation_endpoint": config('IDP_URL') + "/token/revoke",
+  "revocation_endpoint": base_url + "/token/revoke",
   "prompt_values_supported": [
     "consent",
     "login",
     "none"
   ],
-  "userinfo_endpoint": config('IDP_URL') + "/userinfo",
+  "userinfo_endpoint": base_url + "/userinfo",
   "token_endpoint_auth_signing_alg_values_supported": [
     "RS256"
   ],
@@ -120,7 +129,7 @@ async def openid_configuration(request: Request):
   "code_challenge_methods_supported": [
     "S256"
   ],
-  "jwks_uri": config('IDP_URL') + "/jwks.json",
+  "jwks_uri": base_url + "/jwks.json",
   "frontchannel_logout_session_supported": True,
   "subject_types_supported": [
     "public",
@@ -373,29 +382,41 @@ authorized code. The pre authorized code we will check up against the pre author
 If it matches, it will later (when we have created support for it) return the access token of the logged in user.
 """
 @router.post("/token")
-def token(request:Request):
+async def token(request: Request):
     #Fills data with the parameters from the xxx urlencoded content which posts to
     #our endpoint
-    data = request.form
-    tx_code = data.get('tx_code')
+    body = await request.body()
+    body_str = body.decode("utf-8")
+    
+    print("body raw string: ", body_str)
+    
+    parsed_query = parse_qs(body_str)
+    print("parsed query: ", parsed_query)
+    
+    tx_code = parsed_query.get("tx_code")[0]
+    grant_type = parsed_query.get("grant_type")[0]
+    pre_authorized_code = parsed_query.get("pre-authorized_code")[0]
+    
+    #tx_code = data.get('tx_code')
+    print("token endpoint parameters: ", tx_code, " ", grant_type, "", pre_authorized_code)
 
     #Checks if it is supposed to follow pre-autorized code run.
-    grant_type = data.get('grant_type')
     if grant_type == "urn:ietf:params:oauth:grant-type:pre-authorized_code" and tx_code == "123456":
 
         #Gets and sets the parts of the url encoded content.
-        pre_authorized_code = data.get('pre-authorized_code')
+        #pre_authorized_code = data.get('pre-authorized_code')
 
 
         #If the pre autorized code is not same as the one set earlier in credential offer, exception.
-        if pre_authorized_code not in pre_authorized_codes:
-            raise HTTPException(status_code=400, detail="Invalid pre-authorized code")
+        print("pre_authorized_codes: ", pre_authorized_codes)
+        if pre_authorized_codes[pre_authorized_code] is None:
+            raise HTTPException(status_code=401, detail="Invalid pre-authorized code")
 
         #Else, it now will now get the access token of the logged in user of idporten.
         token = getLoggedInUsersToken()
-
+        token = "123"
         response = {
-            "accessToken": token,
+            "access_token": token,
             "token_type": "bearer",
             "expires_in": 86400,
         }
@@ -407,20 +428,59 @@ def token(request:Request):
         }
 
         #Sets headers to the response we will send.
-        response.headers = headers
 
         #Sends the response back so that the wallet gets the id token in return.
-        return response
+        return JSONResponse(content=response, headers=headers)
 
     #If the grant type is not pre-autorized flow:
     else:
         raise HTTPException(status_code=418, detail="Service only supports pre autorized flow.")
 
-
-
 # TODO: this
 @router.post("/credential")
 async def issue_credential(request: Request):
+    payload = {"issuerAuth": "your_value_here"}
+    cbor_payload = cbor2.dumps(payload)
+
+    # Step 2: Generate a key pair for signing (using P-256 curve)
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = private_key.public_key()
+
+    # Extract the key parameters
+    private_numbers = private_key.private_numbers()
+    public_numbers = public_key.public_numbers()
+
+    # Step 3: Create a COSE key
+    cose_key = CoseKey.from_dict({
+        KTY: 'EC2',
+        EC2KpCurve: P256,
+        EC2KpD: private_numbers.private_value.to_bytes(32, 'big'),
+        EC2KpX: public_numbers.x.to_bytes(32, 'big'),
+        EC2KpY: public_numbers.y.to_bytes(32, 'big'),
+        KeyOps: [KeyOps.SIGN]
+    })
+
+    # Step 4: Create the COSE Sign1Message
+    sign1_msg = Sign1Message(phdr={'alg': Es256}, uhdr={}, payload=cbor_payload)
+    sign1_msg.key = cose_key
+
+    # Step 5: Sign the message
+    signed_msg = sign1_msg.encode()
+
+    # Step 6: Base64url encode the signed message
+    import base64
+    credential = base64.urlsafe_b64encode(signed_msg).rstrip(b'=').decode('utf-8')
+    
+    response = {
+        "credential": credential
+    }
+    
+    print("response: ", response)
+    
+    
+    return JSONResponse(content=response)
+    
+    
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")

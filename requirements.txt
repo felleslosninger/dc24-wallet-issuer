@@ -1,12 +1,17 @@
 annotated-types==0.7.0
 anyio==4.4.0
+asn1crypto==1.5.1
+attrs==23.2.0
 Authlib==1.3.1
+cbor2==5.6.4
 certifi==2024.7.4
+certvalidator==0.11.1
 cffi==1.16.0
 charset-normalizer==3.3.2
 click==8.1.7
 cryptography==43.0.0
 dnspython==2.6.1
+ecdsa==0.19.0
 email_validator==2.2.0
 fastapi==0.111.1
 fastapi-cli==0.0.4
@@ -21,7 +26,9 @@ jwt==1.3.1
 markdown-it-py==3.0.0
 MarkupSafe==2.1.5
 mdurl==0.1.2
+oscrypto==1.3.0
 pillow==10.4.0
+pycose==1.1.0
 pycparser==2.22
 pydantic==2.8.2
 pydantic_core==2.20.1
@@ -34,12 +41,13 @@ qrcode==7.4.2
 requests==2.32.3
 rich==13.7.1
 shellingham==1.5.4
+six==1.16.0
 sniffio==1.3.1
 starlette==0.37.2
 typer==0.12.3
 typing_extensions==4.12.2
 urllib3==2.2.2
 uvicorn==0.30.3
-uvloop==0.19.0; platform_system != 'Windows'
+uvloop==0.19.0
 watchfiles==0.22.0
 websockets==12.0
