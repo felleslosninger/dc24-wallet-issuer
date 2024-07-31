@@ -1,6 +1,7 @@
 import qrcode
 import base64
 import urllib.parse
+import json
 from io import BytesIO
 
 
@@ -15,7 +16,12 @@ def generate_qr_code(base_url: str, credential_data: dict) -> str:
         box_size=10,
         border=4,
     )
-    data = base_url + urllib.parse.urlencode(credential_data)
+    json_data = json.dumps(credential_data)
+    
+    # Properly format the URL by encoding the JSON data
+    encoded_data = urllib.parse.quote(json_data)
+    data = f"{base_url}{encoded_data}"
+    
     qr.add_data(data)
     qr.make(fit=True)
 
