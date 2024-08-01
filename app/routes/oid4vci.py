@@ -8,18 +8,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from fastapi.templating import Jinja2Templates
 from urllib.parse import parse_qs
-import cbor2
-from cose.messages import Sign1Message
-from cose.keys import CoseKey
-from cose.keys.keytype import KTY
-from cose.keys.keyops import KeyOps
-from cose.keys.curves import P256
-from cose.algorithms import Es256
-from cose.keys.keyparam import EC2KpCurve, EC2KpD, EC2KpX, EC2KpY
+from pymdoccbor.mdoc.issuer import MdocCborIssuer
 
 import os
-import json
-import jwt
 import uuid
 import base64
 from typing import Dict
@@ -436,82 +427,44 @@ async def token(request: Request):
     else:
         raise HTTPException(status_code=418, detail="Service only supports pre autorized flow.")
 
-# TODO: this
 @router.post("/credential")
 async def issue_credential(request: Request):
-    payload = {"issuerAuth": "your_value_here"}
-    cbor_payload = cbor2.dumps(payload)
-
-    # Step 2: Generate a key pair for signing (using P-256 curve)
-    private_key = ec.generate_private_key(ec.SECP256R1())
-    public_key = private_key.public_key()
-
-    # Extract the key parameters
-    private_numbers = private_key.private_numbers()
-    public_numbers = public_key.public_numbers()
-
-    # Step 3: Create a COSE key
-    cose_key = CoseKey.from_dict({
-        KTY: 'EC2',
-        EC2KpCurve: P256,
-        EC2KpD: private_numbers.private_value.to_bytes(32, 'big'),
-        EC2KpX: public_numbers.x.to_bytes(32, 'big'),
-        EC2KpY: public_numbers.y.to_bytes(32, 'big'),
-        KeyOps: [KeyOps.SIGN]
-    })
-
-    # Step 4: Create the COSE Sign1Message
-    sign1_msg = Sign1Message(phdr={'alg': Es256}, uhdr={}, payload=cbor_payload)
-    sign1_msg.key = cose_key
-
-    # Step 5: Sign the message
-    signed_msg = sign1_msg.encode()
-
-    # Step 6: Base64url encode the signed message
-    import base64
-    credential = base64.urlsafe_b64encode(signed_msg).rstrip(b'=').decode('utf-8')
     
+    PKEY = {
+    'KTY': 'EC2',
+    'CURVE': 'P_256',
+    'ALG': 'ES256',
+    'D': os.urandom(32),
+    'KID': b"test-kid"
+    }
+
+    PID_DATA = {
+        "eu.europa.ec.eudi.loyalty_mdoc": {
+            "client_id": "1234",
+            "company": "Digdir",
+            "expiry_date": datetime.now().isoformat(),
+            "family_name": "Normann",
+            "given_name": "Ola",
+            "issuance_date": datetime.now().isoformat(),
+        }
+    }
+
+    mdoci = MdocCborIssuer(
+        private_key=PKEY
+    )
+
+    mdoci.new(
+        doctype="eu.europa.ec.eudi.loyalty.1",
+        data=PID_DATA,
+        devicekeyinfo=PKEY  # TODO
+    )
+
+    credential = base64.urlsafe_b64encode(mdoci.dump()).decode('utf-8')
+    credential = "ompuYW1lU3BhY2VzoXgeZXUuZXVyb3BhLmVjLmV1ZGkubG95YWx0eV9tZG9jhtgYoQCkaGRpZ2VzdElEAGZyYW5kb21YIMeagLMhnPa-HTirIfZlF7tLKWClrHb9GEBJPJt_vNV4cWVsZW1lbnRJZGVudGlmaWVya2ZhbWlseV9uYW1lbGVsZW1lbnRWYWx1ZWdOb3JtYW5u2BihAaRoZGlnZXN0SUQBZnJhbmRvbVggdQ0uYOzTR8DgG0komN2T4EIEtdbdXOBfiYwKWOlyhA9xZWxlbWVudElkZW50aWZpZXJqZ2l2ZW5fbmFtZWxlbGVtZW50VmFsdWVjT2xh2BihAqRoZGlnZXN0SUQCZnJhbmRvbVgg60urgM0NYcfIp30aPQlfJquUf55noaNG2Ul7XCPfe5hxZWxlbWVudElkZW50aWZpZXJnY29tcGFueWxlbGVtZW50VmFsdWVmRGlnZGly2BihA6RoZGlnZXN0SUQDZnJhbmRvbVgg-dq0_Cnvh3rrUJGq-nA5It4LwDIkEVXVZs4FMULxaclxZWxlbWVudElkZW50aWZpZXJpY2xpZW50X2lkbGVsZW1lbnRWYWx1ZWQxMjM02BihBKRoZGlnZXN0SUQEZnJhbmRvbVgg6F1OB5a5ouy18yjsRoneyNz0drS3_s5_V-Ky7CahKH1xZWxlbWVudElkZW50aWZpZXJtaXNzdWFuY2VfZGF0ZWxlbGVtZW50VmFsdWV4GjIwMjQtMDgtMDFUMTI6MTI6NTkuNzY4MzAz2BihBaRoZGlnZXN0SUQFZnJhbmRvbVggmDex3uaME7xH7lUmQ5TAXtc-ZXDbwtplSiLoR-y45q5xZWxlbWVudElkZW50aWZpZXJrZXhwaXJ5X2RhdGVsZWxlbWVudFZhbHVl2QPseBoyMDI0LTA4LTAxVDEyOjEyOjU5Ljc2ODI5M2ppc3N1ZXJBdXRoWQQ-0oRNogEmBEhkZW1vLWtpZKEYIVkCDTCCAgkwggGvoAMCAQICFGzOGK_NxORUbzVtxz0t5YKY1T2uMAoGCCqGSM49BAMCMGQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRYwFAYDVQQHDA1TYW4gRnJhbmNpc2NvMRMwEQYDVQQKDApNeSBDb21wYW55MRMwEQYDVQQDDApteXNpdGUuY29tMB4XDTI0MDgwMTEwMTI1OVoXDTI0MDgxMTEwMTI1OVowZDELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFjAUBgNVBAcMDVNhbiBGcmFuY2lzY28xEzARBgNVBAoMCk15IENvbXBhbnkxEzARBgNVBAMMCm15c2l0ZS5jb20wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAR67jfrRjSprUbP5n52cIxF6m3tR39NzSLEByOTF6dRYvr-hzWoQN4d1Xb6K2lzBplTDFezyOHvucyJOwWzNsizoz8wPTA7BgNVHREENDAyhjBodHRwczovL2NyZWRlbnRpYWwtaXNzdWVyLm9pZGMtZmVkZXJhdGlvbi5vbmxpbmUwCgYIKoZIzj0EAwIDSAAwRQIgZSYO1F_oDeVEuYNwr5pIEWrD3T8xSoiFxMR2kdXFhGQCIQC2dNtcJsHqy_6BTrgrLbXQxVyuz9oiEdjTMuCNg2dT41kB1qZndmVyc2lvbmMxLjBvZGlnZXN0QWxnb3JpdGhtZnNoYTI1Nmx2YWx1ZURpZ2VzdHOheB5ldS5ldXJvcGEuZWMuZXVkaS5sb3lhbHR5X21kb2OmAFggh0_vP85EoZru577t1qKZlHxdQeLGi0IbQwMg3KOLv28BWCAzDtxW9FohkHzDQSfdgACp1u5owrpazSyYj3_ectIy-gJYIGaSNIwY9oq76j9cjzGwrrb4NmDI-RmeOkz5yWHB_eIhA1ggXvFhVOfr180ETbK-2Dlv9hyTVPFCUi4pme55UMXCskMEWCBG9b9a2BCAAgjYKzV9x74kYLhqMHsfXqzKd35GYu9tAQVYIC848yg8xYdY4ys9fn1ZEg1WqFSojkGVlQCCwRmCEF0PbWRldmljZUtleUluZm-haWRldmljZUtlefZnZG9jVHlwZXgeZXUuZXVyb3BhLmVjLmV1ZGkubG95YWx0eV9tZG9jbHZhbGlkaXR5SW5mb6Nmc2lnbmVkVsB0MjAyNC0wOC0wMVQxMDoxMjo1OVppdmFsaWRGcm9tVsB0MjAyNC0wOC0wMVQxMDoxMjo1OVpqdmFsaWRVbnRpbFbAdDIwMjktMDctMzFUMTA6MTI6NTlaWEB4MfB4w6h3yRWYAHFgpuXDMmNBeShV8-xRV_ywPCZFBmtj7T8pZleJUkQOFTM2PjeBf2oW4iAtga6VYyNYXqys"
     response = {
         "credential": credential
     }
     
-    print("response: ", response)
-    
-    
+    print("Credential: ", credential)
+        
     return JSONResponse(content=response)
-    
-    
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    
-    token = auth_header.split(" ")[1]
-    try:
-        payload = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    pre_auth_code = payload["sub"]
-    if pre_auth_code not in pre_authorized_codes:
-        raise HTTPException(status_code=400, detail="Invalid pre-authorized code")
-    
-    credential_type = pre_authorized_codes[pre_auth_code]["credential_type"]
-    
-    # In a real scenario, you would fetch user data from a secure source
-    user_data = {"id": str(uuid.uuid4()), "email": "user@example.com", "name": "John Doe"}
-    
-    credential = VerifiableCredential(
-        id=f"urn:uuid:{uuid.uuid4()}",
-        type=["VerifiableCredential", credential_type],
-        issuer=ISSUER_DID,
-        issuanceDate=datetime.utcnow().isoformat() + "Z",
-        credentialSubject=CredentialSubject(**user_data)
-    )
-    
-    credentials[credential.id] = credential
-    
-    # In a real scenario, you would sign the credential here
-    
-    return JSONResponse(content=credential.dict())
