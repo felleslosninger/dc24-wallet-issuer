@@ -1,23 +1,17 @@
 from starlette.config import Config
-from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, Header
+from fastapi import Request, HTTPException, APIRouter, Header
 from fastapi.responses import JSONResponse
-from fastapi.responses import HTMLResponse
 from starlette.config import Config
-from starlette.middleware.sessions import SessionMiddleware
-from authlib.integrations.starlette_client import OAuth
-from fastapi.templating import Jinja2Templates
 from urllib.parse import parse_qs
 from pymdoccbor.mdoc.issuer import MdocCborIssuer
 from cryptography.hazmat.primitives import serialization
 
-import os
 import uuid
 import base64
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
 from app.routes.oauth import getLoggedInUsersToken
-from app.model.credential import VerifiableCredential, CredentialSubject
 from app.service.misc import get_base_url
 from app.service.qr_code_service import generate_qr_code
 from app.service.misc import templates
@@ -31,7 +25,6 @@ router = APIRouter()
 config = Config('.env')
 
 # In-memory credential storage (replace with a database in production)
-credentials: Dict[str, VerifiableCredential] = {}
 pre_authorized_codes: Dict[str, Dict] = {}
 
 def create_pre_auth_credential_offer(request: Request, pre_auth_code: str):
@@ -142,7 +135,6 @@ async def credential_issuer_metadata(request: Request):
     https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p.
     """
     base_url = get_base_url(request)
-    # "authorization_servers": [config('IDP_URL')],
     return {
         "credential_issuer": base_url,
         "credential_endpoint": f"{base_url}/credential",
@@ -248,108 +240,6 @@ async def credential_issuer_metadata(request: Request):
             },
         },
     }
-
-    {
-        "credential_issuer": base_url,
-        "credential_endpoint": f"{base_url}/credential",
-        "credential_configurations_supported": {
-            # "eu.europa.ec.eudi.pid_jwt_vc_json": {
-            #     "claims": {
-            #         "ward_pid_number": {
-            #             "display": [
-            #             {
-            #                 "locale": "en",
-            #                 "name": "PID of the ward"
-            #             }
-            #             ],
-            #             "mandatory": False
-            #         },
-            #         "user_pid": {
-            #             "display": [
-            #             {
-            #                 "locale": "en",
-            #                 "name": "PID of user"
-            #             }
-            #             ],
-            #             "mandatory": False
-            #         }
-            #     },
-            #     "display": [
-            #         {
-            #             "locale": "en",
-            #             "logo": {
-            #             "alt_text": "A square figure of a PID",
-            #             "url": ""
-            #             },
-            #             "name": "PID"
-            #         }
-            #     ],
-            #     "types": ["VerifiableCredential", "WardCredential"],
-            #     "format": "vc+sd-jwt",
-            #     "scope": "eu.europa.ec.eudi.pid.1", # Skjønner ikke helt.
-            #     "vct": "eu.europa.ec.eudi.pid_jwt_vc_json"
-            # },
-            "eu.europa.ec.eudi.ward_mdoc": {
-                "claims": {
-                    "eu.europa.ec.eudi.ward.1": {
-                        "client_id": {
-                            "display": [
-                            {
-                                "locale": "en",
-                                "name": "Comapny internal client id"
-                            }
-                            ],
-                            "mandatory": False,
-                            "value_type": "string"
-                        },
-                        "company": {
-                            "display": [
-                            {
-                                "locale": "en",
-                                "name": "Loyalty card company"
-                            }
-                            ],
-                            "mandatory": False,
-                            "value_type": "string"
-                        },
-                    },
-                },
-            },
-            # "credential_signing_alg_values_supported": [
-            #     "ES256"
-            # ],
-            # "cryptographic_binding_methods_supported": [
-            #     "jwk",
-            #     "cose_key"
-            # ],
-            # "display": [
-            #         {
-            #             "locale": "en",
-            #             "logo": {
-            #             "alt_text": "A square figure of a PID",
-            #             "url": ""
-            #             },
-            #             "name": "PID"
-            #         }
-            #     ],
-            "doctype": "eu.europa.ec.eudi.ward.1",
-            "format": "mso_mdoc",
-            # "proof_types_supported": {
-            #     "cwt": {
-            #         "proof_alg_values_supported": [-7],
-            #         "proof_crv_values_supported": [1],
-            #         "proof_signing_alg_values_supported": [
-            #             "ES256"
-            #         ]
-            #     },
-            #     "jwt": {
-            #         "proof_signing_alg_values_supported": [
-            #             "ES256"
-            #         ]
-            #     }
-            # },
-        },
-    }
     
 @router.get("/credential_offer")
 async def credential_offer_qr(request: Request):
@@ -367,13 +257,13 @@ async def credential_offer_qr(request: Request):
     print("Pre-auth-code saved in local storage!")
     return templates.TemplateResponse("qr_code.html", {"request": request, "qr_code": qr_code, "data": data})
 
-"""
-Token endpoint. The wallet will send a post request to this endpoint, and that will contain a tx code and a pre 
-authorized code. The pre authorized code we will check up against the pre authorized code registered with us. 
-If it matches, it will later (when we have created support for it) return the access token of the logged in user.
-"""
 @router.post("/token")
 async def token(request: Request):
+    """
+    Token endpoint. The wallet will send a post request to this endpoint, and that will contain a tx code and a pre 
+    authorized code. The pre authorized code we will check up against the pre authorized code registered with us. 
+    If it matches, it will later (when we have created support for it) return the access token of the logged in user.
+    """
     #Fills data with the parameters from the xxx urlencoded content which posts to
     #our endpoint
     body = await request.body()
@@ -443,8 +333,6 @@ async def issue_credential(request: Request, x_public_key: Optional[str] = Heade
         "issuance_date": "2023-08-01",
         "expiry_date": "2069-08-01",
     }
-    print(validity["issuance_date"])
-    print(datetime.strptime(validity["issuance_date"], "%Y-%m-%d"))
     
     with open("app/keys/private_key.pem", "rb") as file:
         private_key = serialization.load_pem_private_key(file.read(), password=None)
@@ -473,7 +361,6 @@ async def issue_credential(request: Request, x_public_key: Optional[str] = Heade
     }
 
     mdoci = MdocCborIssuer(private_key=cose_pkey, alg="ES256")
-    print(device_publickey)
     mdoci.new(
         doctype="eu.europa.ec.eudi.loyalty.1",
         data=PID_DATA,
@@ -483,14 +370,8 @@ async def issue_credential(request: Request, x_public_key: Optional[str] = Heade
     )
 
     credential = base64.urlsafe_b64encode(mdoci.dump()).decode("utf-8")
-    #credential = "omppc3N1ZXJBdXRohEOhASahGCFZAewwggHoMIIBjqADAgECAhRrbaF92slmfxT-E2aALEErcn6_-jAKBggqhkjOPQQDAjBZMQswCQYDVQQGEwJOTzERMA8GA1UECAwIVmVzdGxhbmQxEjAQBgNVBAcMCUxlaWthbmdlcjEPMA0GA1UECgwGRGlnZGlyMRIwEAYDVQQDDAlkaWdkaXIubm8wHhcNMjQwODAyMTAzNTA0WhcNMjUwODAyMTAzNTA0WjBZMQswCQYDVQQGEwJOTzERMA8GA1UECAwIVmVzdGxhbmQxEjAQBgNVBAcMCUxlaWthbmdlcjEPMA0GA1UECgwGRGlnZGlyMRIwEAYDVQQDDAlkaWdkaXIubm8wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATdp86_xcOlLyvif2iWUEKrd86LjyZJAkRxeRNSVOezCPmlL5KxT2r4_ESpAl49LWyx0kLKLgXbb4Me8oOsQZhBozQwMjAwBgNVHREEKTAngglsb2NhbGhvc3SCGmRjMjQtd2FsbGV0LWlzc3Vlci5mbHkuZGV2MAoGCCqGSM49BAMCA0gAMEUCICcaz7jNPcVDqASJUL5qkR2hk9Ov9UD01Zs-uFlPdQkFAiEAjyonYOQhBK8V5F3xUB_ZQMEwfUPZNkrBQ1K1jPcIj9tZAXHYGFkBbKZnZG9jVHlwZXgbZXUuZXVyb3BhLmVjLmV1ZGkubG95YWx0eS4xZ3ZlcnNpb25jMS4wbHZhbGlkaXR5SW5mb6Nmc2lnbmVkwHQyMDI0LTA4LTAyVDEwOjQ2OjMzWml2YWxpZEZyb23AdDIwMjQtMDgtMDJUMTA6NDY6MzNaanZhbGlkVW50aWzAdDIwNjktMDgtMDFUMDA6MDA6MDBabHZhbHVlRGlnZXN0c6F4HmV1LmV1cm9wYS5lYy5ldWRpLmxveWFsdHlfbWRvY6EAWCDzdBLgQa7c2jH3uA2vSwQxUBwn-2Gc0unNGNz3i8dHqG1kZXZpY2VLZXlJbmZvoWlkZXZpY2VLZXmkAQIgASFYIN2nzr_Fw6UvK-J_aJZQQqt3zouPJkkCRHF5E1JU57MIIlgg-aUvkrFPavj8RKkCXj0tbLHSQsouBdtvgx7yg6xBmEFvZGlnZXN0QWxnb3JpdGhtZ1NIQS0yNTZYQLV3FHTskJhusyVrJtHdyj1OyNXZZU63ikre70fXiA0EIrfd08Ba_EKUQNtOqKhFJJA4wgzqISAhYgVDOSRQHO9qbmFtZVNwYWNlc6F4HmV1LmV1cm9wYS5lYy5ldWRpLmxveWFsdHlfbWRvY4HYGFhipGZyYW5kb21YIAOnVnCvgosqzOQYPkCwzL4BeM6GM1CKxQTfV-_K7JDAaGRpZ2VzdElEAGxlbGVtZW50VmFsdWVkMTIzNHFlbGVtZW50SWRlbnRpZmllcmljbGllbnRfaWQ="
     response = {
         "credential": credential
     }
     
-    print("Credential: ", credential)
-    
-    print("Request: ", request.app, " ", request.base_url, " ", request.client, " ", request.cookies, " ", request.headers, " ", request.method, " ", request.query_params, " ", request.scope, " ", request.url, " ", request.url_for)
-        
-    print("x_public_key: ", x_public_key)
     return JSONResponse(content=response)
