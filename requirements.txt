@@ -37,7 +37,7 @@ pydantic==2.8.2
 pydantic_core==2.20.1
 Pygments==2.18.0
 pyhpke==0.4.1
-pymdoccbor @ git+https://github.com/peppelinux/pyMDOC-CBOR.git@4d5bdee3471cfca25cc4208071d645a08011509c
+pymdoccbor @ git+https://github.com/devisefutures/pyMDOC-CBOR.git@cert_arg
 pypng==0.20220715.0
 python-dotenv==1.0.1
 python-multipart==0.0.9

@@ -1,6 +1,5 @@
 from starlette.config import Config
-from fastapi import APIRouter, Request
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, Header
 from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
 from starlette.config import Config
@@ -9,11 +8,12 @@ from authlib.integrations.starlette_client import OAuth
 from fastapi.templating import Jinja2Templates
 from urllib.parse import parse_qs
 from pymdoccbor.mdoc.issuer import MdocCborIssuer
+from cryptography.hazmat.primitives import serialization
 
 import os
 import uuid
 import base64
-from typing import Dict
+from typing import Dict, Optional
 from datetime import datetime, timedelta
 
 from app.routes.oauth import getLoggedInUsersToken
@@ -146,7 +146,7 @@ async def credential_issuer_metadata(request: Request):
     return {
         "credential_issuer": base_url,
         "credential_endpoint": f"{base_url}/credential",
-        #"authorization_servers": [config('IDP_URL')],
+        #"authorization_servers": [config('IDP_URL')], # This should be ID-porten, but this application was used during testing.
         "credential_configurations_supported": {
             "eu.europa.ec.eudi.loyalty_mdoc": {
                 "claims": {
@@ -428,43 +428,69 @@ async def token(request: Request):
         raise HTTPException(status_code=418, detail="Service only supports pre autorized flow.")
 
 @router.post("/credential")
-async def issue_credential(request: Request):
-    
-    PKEY = {
-    'KTY': 'EC2',
-    'CURVE': 'P_256',
-    'ALG': 'ES256',
-    'D': os.urandom(32),
-    'KID': b"test-kid"
-    }
-
+async def issue_credential(request: Request, x_public_key: Optional[str] = Header(None)):
     PID_DATA = {
         "eu.europa.ec.eudi.loyalty_mdoc": {
             "client_id": "1234",
-            "company": "Digdir",
-            "expiry_date": datetime.now().isoformat(),
-            "family_name": "Normann",
-            "given_name": "Ola",
-            "issuance_date": datetime.now().isoformat(),
+            # "company": "Digdir",
+            # "expiry_date": datetime.now().isoformat(),
+            # "family_name": "Normann",
+            # "given_name": "Ola",
+            # "issuance_date": datetime.now().isoformat(),
         }
     }
+    validity = {
+        "issuance_date": "2023-08-01",
+        "expiry_date": "2069-08-01",
+    }
+    print(validity["issuance_date"])
+    print(datetime.strptime(validity["issuance_date"], "%Y-%m-%d"))
+    
+    with open("app/keys/private_key.pem", "rb") as file:
+        private_key = serialization.load_pem_private_key(file.read(), password=None)
+    
+    priv_d = private_key.private_numbers().private_value
+    
+    with open("app/keys/public_key.pem", "rb") as file:
+        public_key = serialization.load_pem_public_key(file.read())
+    cose_pkey = {
+        "KTY": "EC2",
+        "CURVE": "P_256",
+        "ALG": "ES256",
+        "D": priv_d.to_bytes((priv_d.bit_length() + 7) // 8, "big"),
+        "KID": b"mdocIssuerPkey",
+    }
+    public_numbers = public_key.public_numbers()
+    x = public_numbers.x
+    y = public_numbers.y
+    x_bytes = x.to_bytes((x.bit_length() + 7) // 8, byteorder='big')
+    y_bytes = y.to_bytes((y.bit_length() + 7) // 8, byteorder='big')
+    device_publickey = {
+        1: 2,
+        -1: 1,
+        -2: x_bytes,
+        -3: y_bytes,
+    }
 
-    mdoci = MdocCborIssuer(
-        private_key=PKEY
-    )
-
+    mdoci = MdocCborIssuer(private_key=cose_pkey, alg="ES256")
+    print(device_publickey)
     mdoci.new(
         doctype="eu.europa.ec.eudi.loyalty.1",
         data=PID_DATA,
-        devicekeyinfo=PKEY  # TODO
+        validity=validity,
+        devicekeyinfo=device_publickey,
+        cert_path="app/keys/certificate.pem",
     )
 
-    credential = base64.urlsafe_b64encode(mdoci.dump()).decode('utf-8')
-    credential = "ompuYW1lU3BhY2VzoXgeZXUuZXVyb3BhLmVjLmV1ZGkubG95YWx0eV9tZG9jhtgYoQCkaGRpZ2VzdElEAGZyYW5kb21YIMeagLMhnPa-HTirIfZlF7tLKWClrHb9GEBJPJt_vNV4cWVsZW1lbnRJZGVudGlmaWVya2ZhbWlseV9uYW1lbGVsZW1lbnRWYWx1ZWdOb3JtYW5u2BihAaRoZGlnZXN0SUQBZnJhbmRvbVggdQ0uYOzTR8DgG0komN2T4EIEtdbdXOBfiYwKWOlyhA9xZWxlbWVudElkZW50aWZpZXJqZ2l2ZW5fbmFtZWxlbGVtZW50VmFsdWVjT2xh2BihAqRoZGlnZXN0SUQCZnJhbmRvbVgg60urgM0NYcfIp30aPQlfJquUf55noaNG2Ul7XCPfe5hxZWxlbWVudElkZW50aWZpZXJnY29tcGFueWxlbGVtZW50VmFsdWVmRGlnZGly2BihA6RoZGlnZXN0SUQDZnJhbmRvbVgg-dq0_Cnvh3rrUJGq-nA5It4LwDIkEVXVZs4FMULxaclxZWxlbWVudElkZW50aWZpZXJpY2xpZW50X2lkbGVsZW1lbnRWYWx1ZWQxMjM02BihBKRoZGlnZXN0SUQEZnJhbmRvbVgg6F1OB5a5ouy18yjsRoneyNz0drS3_s5_V-Ky7CahKH1xZWxlbWVudElkZW50aWZpZXJtaXNzdWFuY2VfZGF0ZWxlbGVtZW50VmFsdWV4GjIwMjQtMDgtMDFUMTI6MTI6NTkuNzY4MzAz2BihBaRoZGlnZXN0SUQFZnJhbmRvbVggmDex3uaME7xH7lUmQ5TAXtc-ZXDbwtplSiLoR-y45q5xZWxlbWVudElkZW50aWZpZXJrZXhwaXJ5X2RhdGVsZWxlbWVudFZhbHVl2QPseBoyMDI0LTA4LTAxVDEyOjEyOjU5Ljc2ODI5M2ppc3N1ZXJBdXRoWQQ-0oRNogEmBEhkZW1vLWtpZKEYIVkCDTCCAgkwggGvoAMCAQICFGzOGK_NxORUbzVtxz0t5YKY1T2uMAoGCCqGSM49BAMCMGQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRYwFAYDVQQHDA1TYW4gRnJhbmNpc2NvMRMwEQYDVQQKDApNeSBDb21wYW55MRMwEQYDVQQDDApteXNpdGUuY29tMB4XDTI0MDgwMTEwMTI1OVoXDTI0MDgxMTEwMTI1OVowZDELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFjAUBgNVBAcMDVNhbiBGcmFuY2lzY28xEzARBgNVBAoMCk15IENvbXBhbnkxEzARBgNVBAMMCm15c2l0ZS5jb20wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAR67jfrRjSprUbP5n52cIxF6m3tR39NzSLEByOTF6dRYvr-hzWoQN4d1Xb6K2lzBplTDFezyOHvucyJOwWzNsizoz8wPTA7BgNVHREENDAyhjBodHRwczovL2NyZWRlbnRpYWwtaXNzdWVyLm9pZGMtZmVkZXJhdGlvbi5vbmxpbmUwCgYIKoZIzj0EAwIDSAAwRQIgZSYO1F_oDeVEuYNwr5pIEWrD3T8xSoiFxMR2kdXFhGQCIQC2dNtcJsHqy_6BTrgrLbXQxVyuz9oiEdjTMuCNg2dT41kB1qZndmVyc2lvbmMxLjBvZGlnZXN0QWxnb3JpdGhtZnNoYTI1Nmx2YWx1ZURpZ2VzdHOheB5ldS5ldXJvcGEuZWMuZXVkaS5sb3lhbHR5X21kb2OmAFggh0_vP85EoZru577t1qKZlHxdQeLGi0IbQwMg3KOLv28BWCAzDtxW9FohkHzDQSfdgACp1u5owrpazSyYj3_ectIy-gJYIGaSNIwY9oq76j9cjzGwrrb4NmDI-RmeOkz5yWHB_eIhA1ggXvFhVOfr180ETbK-2Dlv9hyTVPFCUi4pme55UMXCskMEWCBG9b9a2BCAAgjYKzV9x74kYLhqMHsfXqzKd35GYu9tAQVYIC848yg8xYdY4ys9fn1ZEg1WqFSojkGVlQCCwRmCEF0PbWRldmljZUtleUluZm-haWRldmljZUtlefZnZG9jVHlwZXgeZXUuZXVyb3BhLmVjLmV1ZGkubG95YWx0eV9tZG9jbHZhbGlkaXR5SW5mb6Nmc2lnbmVkVsB0MjAyNC0wOC0wMVQxMDoxMjo1OVppdmFsaWRGcm9tVsB0MjAyNC0wOC0wMVQxMDoxMjo1OVpqdmFsaWRVbnRpbFbAdDIwMjktMDctMzFUMTA6MTI6NTlaWEB4MfB4w6h3yRWYAHFgpuXDMmNBeShV8-xRV_ywPCZFBmtj7T8pZleJUkQOFTM2PjeBf2oW4iAtga6VYyNYXqys"
+    credential = base64.urlsafe_b64encode(mdoci.dump()).decode("utf-8")
+    #credential = "omppc3N1ZXJBdXRohEOhASahGCFZAewwggHoMIIBjqADAgECAhRrbaF92slmfxT-E2aALEErcn6_-jAKBggqhkjOPQQDAjBZMQswCQYDVQQGEwJOTzERMA8GA1UECAwIVmVzdGxhbmQxEjAQBgNVBAcMCUxlaWthbmdlcjEPMA0GA1UECgwGRGlnZGlyMRIwEAYDVQQDDAlkaWdkaXIubm8wHhcNMjQwODAyMTAzNTA0WhcNMjUwODAyMTAzNTA0WjBZMQswCQYDVQQGEwJOTzERMA8GA1UECAwIVmVzdGxhbmQxEjAQBgNVBAcMCUxlaWthbmdlcjEPMA0GA1UECgwGRGlnZGlyMRIwEAYDVQQDDAlkaWdkaXIubm8wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATdp86_xcOlLyvif2iWUEKrd86LjyZJAkRxeRNSVOezCPmlL5KxT2r4_ESpAl49LWyx0kLKLgXbb4Me8oOsQZhBozQwMjAwBgNVHREEKTAngglsb2NhbGhvc3SCGmRjMjQtd2FsbGV0LWlzc3Vlci5mbHkuZGV2MAoGCCqGSM49BAMCA0gAMEUCICcaz7jNPcVDqASJUL5qkR2hk9Ov9UD01Zs-uFlPdQkFAiEAjyonYOQhBK8V5F3xUB_ZQMEwfUPZNkrBQ1K1jPcIj9tZAXHYGFkBbKZnZG9jVHlwZXgbZXUuZXVyb3BhLmVjLmV1ZGkubG95YWx0eS4xZ3ZlcnNpb25jMS4wbHZhbGlkaXR5SW5mb6Nmc2lnbmVkwHQyMDI0LTA4LTAyVDEwOjQ2OjMzWml2YWxpZEZyb23AdDIwMjQtMDgtMDJUMTA6NDY6MzNaanZhbGlkVW50aWzAdDIwNjktMDgtMDFUMDA6MDA6MDBabHZhbHVlRGlnZXN0c6F4HmV1LmV1cm9wYS5lYy5ldWRpLmxveWFsdHlfbWRvY6EAWCDzdBLgQa7c2jH3uA2vSwQxUBwn-2Gc0unNGNz3i8dHqG1kZXZpY2VLZXlJbmZvoWlkZXZpY2VLZXmkAQIgASFYIN2nzr_Fw6UvK-J_aJZQQqt3zouPJkkCRHF5E1JU57MIIlgg-aUvkrFPavj8RKkCXj0tbLHSQsouBdtvgx7yg6xBmEFvZGlnZXN0QWxnb3JpdGhtZ1NIQS0yNTZYQLV3FHTskJhusyVrJtHdyj1OyNXZZU63ikre70fXiA0EIrfd08Ba_EKUQNtOqKhFJJA4wgzqISAhYgVDOSRQHO9qbmFtZVNwYWNlc6F4HmV1LmV1cm9wYS5lYy5ldWRpLmxveWFsdHlfbWRvY4HYGFhipGZyYW5kb21YIAOnVnCvgosqzOQYPkCwzL4BeM6GM1CKxQTfV-_K7JDAaGRpZ2VzdElEAGxlbGVtZW50VmFsdWVkMTIzNHFlbGVtZW50SWRlbnRpZmllcmljbGllbnRfaWQ="
     response = {
         "credential": credential
     }
     
     print("Credential: ", credential)
+    
+    print("Request: ", request.app, " ", request.base_url, " ", request.client, " ", request.cookies, " ", request.headers, " ", request.method, " ", request.query_params, " ", request.scope, " ", request.url, " ", request.url_for)
         
+    print("x_public_key: ", x_public_key)
     return JSONResponse(content=response)

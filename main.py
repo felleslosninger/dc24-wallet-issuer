@@ -28,4 +28,4 @@ async def home_page(request: Request):
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8980))
     import uvicorn
-    uvicorn.run(app, port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port, ssl_keyfile="app/keys/private_key.pem", ssl_certfile="app/keys/certificate.pem")

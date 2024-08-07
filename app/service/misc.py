@@ -6,5 +6,5 @@ templates = Jinja2Templates(directory="templates")
 
 def get_base_url(request: Request):
     host = request.headers.get("host", "localhost")
-    scheme = request.headers.get("x-forwarded-proto", "http")
+    scheme = request.headers.get("x-forwarded-proto", "https")
     return f"{scheme}://{host}"
