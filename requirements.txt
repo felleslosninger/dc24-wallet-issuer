@@ -11,7 +11,7 @@ certvalidator==0.11.1
 cffi==1.16.0
 charset-normalizer==3.3.2
 click==8.1.7
-cryptography==39.0.0
+cryptography==42.0.4
 cwt==2.3.1
 dnspython==2.6.1
 ecdsa==0.19.0
